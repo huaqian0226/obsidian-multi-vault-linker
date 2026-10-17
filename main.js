@@ -366,6 +366,18 @@ var MultiVaultLinkerPlugin = class extends import_obsidian.Plugin {
       new import_obsidian.Notice(`\u5DF2\u6E05\u7406 ${stale.length} \u4E2A ${BACKUP_KEEP_DAYS} \u5929\u524D\u7684\u5907\u4EFD`);
     return stale.length;
   }
+  /** Manually delete the given backup paths (backup manager). Returns count removed. */
+  deleteBackups(paths) {
+    let n = 0;
+    for (const p of paths) {
+      try {
+        fs.rmSync(p, { recursive: true, force: true });
+        n++;
+      } catch (e) {
+      }
+    }
+    return n;
+  }
 };
 var MvlSettingTab = class extends import_obsidian.PluginSettingTab {
   constructor(app, plugin) {
@@ -419,6 +431,7 @@ var LinkerModal = class extends import_obsidian.Modal {
     // keyed by vault root path
     this.pickedItems = /* @__PURE__ */ new Set();
     this.planEl = null;
+    this.backupEl = null;
     this.plugin = plugin;
   }
   onOpen() {
@@ -437,7 +450,15 @@ var LinkerModal = class extends import_obsidian.Modal {
         text: "\u6CA1\u6709\u627E\u5230\u76EE\u6807\u5E93\u3002\u53EF\u5728\u4E0B\u65B9\u6DFB\u52A0\u626B\u63CF\u6839\u76EE\u5F55\uFF0C\u6216\u76F4\u63A5\u8F93\u5165\u4E00\u4E2A\u5E93\u6587\u4EF6\u5939\u8DEF\u5F84\u3002"
       });
     }
-    contentEl.createEl("h4", { text: "\u2460 \u76EE\u6807\u5E93\uFF08\u591A\u9009\uFF1B\u9ED8\u8BA4\u5168\u9009\uFF09" });
+    const vHead = contentEl.createEl("div", { cls: "mvl-section-head" });
+    vHead.createEl("h4", { text: "\u2460 \u76EE\u6807\u5E93\uFF08\u591A\u9009\uFF1B\u9ED8\u8BA4\u5168\u9009\uFF09" });
+    const vBtns = vHead.createEl("span", { cls: "mvl-inline-btns" });
+    vBtns.createEl("button", { text: "\u5168\u9009" }, (b) => b.addEventListener("click", () => {
+      this.toggleAll(vlist, true, vaults.map((v) => v.root), this.pickedVaults);
+    }));
+    vBtns.createEl("button", { text: "\u5168\u4E0D\u9009" }, (b) => b.addEventListener("click", () => {
+      this.toggleAll(vlist, false, vaults.map((v) => v.root), this.pickedVaults);
+    }));
     const vlist = contentEl.createEl("div", { cls: "mvl-list" });
     const drift = this.plugin.scanDrift();
     const backups = this.plugin.listBackups();
@@ -496,7 +517,15 @@ var LinkerModal = class extends import_obsidian.Modal {
       manualInput.value = "";
       this.refresh();
     }));
-    contentEl.createEl("h4", { text: "\u2461 \u5171\u4EAB\u9879\uFF08\u9ED8\u8BA4\u5168\u9009\uFF1B\u4E3B\u5E93\u4E13\u5C5E\u9879\u5DF2\u6392\u9664\uFF09" });
+    const iHead = contentEl.createEl("div", { cls: "mvl-section-head" });
+    iHead.createEl("h4", { text: "\u2461 \u5171\u4EAB\u9879\uFF08\u9ED8\u8BA4\u5168\u9009\uFF1B\u4E3B\u5E93\u4E13\u5C5E\u9879\u5DF2\u6392\u9664\uFF09" });
+    const iBtns = iHead.createEl("span", { cls: "mvl-inline-btns" });
+    iBtns.createEl("button", { text: "\u5168\u9009" }, (b) => b.addEventListener("click", () => {
+      this.toggleAll(ilist, true, items.map((i) => i.name), this.pickedItems);
+    }));
+    iBtns.createEl("button", { text: "\u5168\u4E0D\u9009" }, (b) => b.addEventListener("click", () => {
+      this.toggleAll(ilist, false, items.map((i) => i.name), this.pickedItems);
+    }));
     const ilist = contentEl.createEl("div", { cls: "mvl-list" });
     for (const it of items) {
       const row = ilist.createEl("label", { cls: "mvl-row" });
@@ -515,6 +544,7 @@ var LinkerModal = class extends import_obsidian.Modal {
     actions.createEl("button", { text: "\u5907\u4EFD\u7BA1\u7406" }, (b) => b.addEventListener("click", () => this.showBackups()));
     this.planEl = contentEl.createEl("pre", { cls: "mvl-plan" });
     this.planEl.setText("\u70B9\u51FB\u300C\u9884\u89C8\u8BA1\u5212\u300D\u67E5\u770B\u6BCF\u4E2A\u5E93\u5C06\u53D1\u751F\u4EC0\u4E48\u3002");
+    this.backupEl = contentEl.createEl("div");
   }
   onClose() {
     this.contentEl.empty();
@@ -523,6 +553,18 @@ var LinkerModal = class extends import_obsidian.Modal {
   refresh() {
     this.contentEl.empty();
     this.onOpen();
+  }
+  /** Set every checkbox inside `container` to `on` and sync the picked set. */
+  toggleAll(container, on, keys, picked) {
+    container.querySelectorAll("input[type=checkbox]").forEach((el) => {
+      el.checked = on;
+    });
+    for (const k of keys) {
+      if (on)
+        picked.add(k);
+      else
+        picked.delete(k);
+    }
   }
   selectedVaults() {
     return this.plugin.scanVaults().filter((v) => this.pickedVaults.has(v.root));
@@ -585,16 +627,52 @@ var LinkerModal = class extends import_obsidian.Modal {
   }
   showBackups() {
     const all = this.plugin.listBackups();
+    const el = this.backupEl;
+    if (!el)
+      return;
+    el.empty();
+    el.createEl("h4", { text: "\u{1F5D1} \u5907\u4EFD\u7BA1\u7406" });
     if (all.length === 0) {
-      if (this.planEl)
-        this.planEl.setText("\u5907\u4EFD\u7BA1\u7406\uFF1A\u8FD8\u6CA1\u6709\u4EFB\u4F55 .bak-* \u5907\u4EFD\u3002");
+      el.createEl("p", { text: "\u8FD8\u6CA1\u6709\u4EFB\u4F55 .bak-* \u5907\u4EFD\u3002\u6267\u884C\u540C\u6B65\u4EA7\u751F\u5907\u4EFD\u540E\u4F1A\u51FA\u73B0\u5728\u8FD9\u91CC\u3002" });
       return;
     }
-    const lines = [`\u5907\u4EFD\u7BA1\u7406\uFF08\u5171 ${all.length} \u4E2A\uFF0C\u8D85\u8FC7 ${BACKUP_KEEP_DAYS} \u5929\u7684\u4F1A\u5728\u52A0\u8F7D\u65F6\u81EA\u52A8\u6E05\u7406\uFF09\uFF1A`];
-    for (const b of all)
-      lines.push(`  ${b.vault} \u2192 ${path.basename(b.path)}\uFF08${Math.floor(b.ageDays)} \u5929\u524D\uFF09`);
-    lines.push("", "\u624B\u52A8\u5220\u9664\u8BF7\u76F4\u63A5\u5230\u5BF9\u5E94 vault \u7684 .obsidian \u91CC\u64CD\u4F5C\uFF1B\u6216\u70B9\u300C\u9884\u89C8\u8BA1\u5212\u2192\u6267\u884C\u540C\u6B65\u300D\u8BA9\u65E7\u6587\u4EF6\u518D\u6B21\u88AB\u5907\u4EFD\u66FF\u6362\u3002");
-    if (this.planEl)
-      this.planEl.setText(lines.join("\n"));
+    el.createEl("div", {
+      text: `\u5171 ${all.length} \u4E2A\u5907\u4EFD\uFF08\u8D85\u8FC7 ${BACKUP_KEEP_DAYS} \u5929\u7684\u5728\u63D2\u4EF6\u52A0\u8F7D\u65F6\u4F1A\u81EA\u52A8\u6E05\u7406\uFF09\uFF1B\u52FE\u9009\u540E\u70B9\u300C\u5220\u9664\u9009\u4E2D\u300D\u3002`,
+      cls: "mvl-summary"
+    });
+    const list = el.createEl("div", { cls: "mvl-list" });
+    const picked = /* @__PURE__ */ new Set();
+    for (const b of all) {
+      const row = list.createEl("label", { cls: "mvl-row" });
+      const cb = row.createEl("input", { type: "checkbox" });
+      cb.addEventListener("change", () => {
+        cb.checked ? picked.add(b.path) : picked.delete(b.path);
+      });
+      row.createEl("span", {
+        text: `${b.vault} \u2192 ${path.basename(b.path)}\uFF08${Math.floor(b.ageDays)} \u5929\u524D\uFF09`,
+        cls: "mvl-name"
+      });
+    }
+    const bar = el.createEl("div", { cls: "mvl-actions" });
+    const pathsOf = () => all.map((b) => b.path);
+    const setAll = (on) => {
+      list.querySelectorAll("input[type=checkbox]").forEach((c) => {
+        c.checked = on;
+      });
+      for (const p of pathsOf()) {
+        if (on)
+          picked.add(p);
+        else
+          picked.delete(p);
+      }
+    };
+    bar.createEl("button", { text: "\u5168\u9009" }, (b) => b.addEventListener("click", () => setAll(true)));
+    bar.createEl("button", { text: "\u5168\u4E0D\u9009" }, (b) => b.addEventListener("click", () => setAll(false)));
+    bar.createEl("button", { text: "\u5220\u9664\u9009\u4E2D", cls: "mod-warning" }, (b) => b.addEventListener("click", () => {
+      const n = this.plugin.deleteBackups([...picked]);
+      picked.clear();
+      new import_obsidian.Notice(n > 0 ? `\u5DF2\u5220\u9664 ${n} \u4E2A\u5907\u4EFD` : "\u6CA1\u6709\u9009\u4E2D\u4EFB\u4F55\u5907\u4EFD");
+      this.showBackups();
+    }));
   }
 };

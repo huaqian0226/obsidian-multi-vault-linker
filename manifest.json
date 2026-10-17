@@ -1,7 +1,7 @@
 {
   "id": "multi-vault-linker",
   "name": "多仓库同步器",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "minAppVersion": "1.11.4",
   "description": "在 dotfiles 主库里选择共享项与目标库，一键建立指向主配置源的 symlink；含备份管理与漂移检查。",
   "author": "huaqian0726",

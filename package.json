@@ -1,6 +1,6 @@
 {
   "name": "obsidian-multi-vault-linker",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Link shared Obsidian vault configs from a dotfiles master vault to every target vault via symlinks.",
   "main": "main.js",
   "scripts": {

@@ -340,6 +340,15 @@ export default class MultiVaultLinkerPlugin extends Plugin {
 		if (!silent && stale.length > 0) new Notice(`已清理 ${stale.length} 个 ${BACKUP_KEEP_DAYS} 天前的备份`);
 		return stale.length;
 	}
+
+	/** Manually delete the given backup paths (backup manager). Returns count removed. */
+	deleteBackups(paths: string[]): number {
+		let n = 0;
+		for (const p of paths) {
+			try { fs.rmSync(p, { recursive: true, force: true }); n++; } catch { /* ignore */ }
+		}
+		return n;
+	}
 }
 
 /* ------------------------------- settings tab ------------------------------- */
@@ -411,6 +420,7 @@ class LinkerModal extends Modal {
 	private pickedVaults = new Set<string>(); // keyed by vault root path
 	private pickedItems = new Set<string>();
 	private planEl: HTMLElement | null = null;
+	private backupEl: HTMLElement | null = null;
 
 	constructor(app: any, plugin: MultiVaultLinkerPlugin) {
 		super(app);
@@ -436,7 +446,15 @@ class LinkerModal extends Modal {
 		}
 
 		/* --- target vaults --- */
-		contentEl.createEl("h4", { text: "① 目标库（多选；默认全选）" });
+		const vHead = contentEl.createEl("div", { cls: "mvl-section-head" });
+		vHead.createEl("h4", { text: "① 目标库（多选；默认全选）" });
+		const vBtns = vHead.createEl("span", { cls: "mvl-inline-btns" });
+		vBtns.createEl("button", { text: "全选" }, (b) => b.addEventListener("click", () => {
+			this.toggleAll(vlist, true, vaults.map((v) => v.root), this.pickedVaults);
+		}));
+		vBtns.createEl("button", { text: "全不选" }, (b) => b.addEventListener("click", () => {
+			this.toggleAll(vlist, false, vaults.map((v) => v.root), this.pickedVaults);
+		}));
 		const vlist = contentEl.createEl("div", { cls: "mvl-list" });
 		const drift = this.plugin.scanDrift();
 		const backups = this.plugin.listBackups();
@@ -492,7 +510,15 @@ class LinkerModal extends Modal {
 		}));
 
 		/* --- shareable items --- */
-		contentEl.createEl("h4", { text: "② 共享项（默认全选；主库专属项已排除）" });
+		const iHead = contentEl.createEl("div", { cls: "mvl-section-head" });
+		iHead.createEl("h4", { text: "② 共享项（默认全选；主库专属项已排除）" });
+		const iBtns = iHead.createEl("span", { cls: "mvl-inline-btns" });
+		iBtns.createEl("button", { text: "全选" }, (b) => b.addEventListener("click", () => {
+			this.toggleAll(ilist, true, items.map((i) => i.name), this.pickedItems);
+		}));
+		iBtns.createEl("button", { text: "全不选" }, (b) => b.addEventListener("click", () => {
+			this.toggleAll(ilist, false, items.map((i) => i.name), this.pickedItems);
+		}));
 		const ilist = contentEl.createEl("div", { cls: "mvl-list" });
 		for (const it of items) {
 			const row = ilist.createEl("label", { cls: "mvl-row" });
@@ -514,6 +540,7 @@ class LinkerModal extends Modal {
 
 		this.planEl = contentEl.createEl("pre", { cls: "mvl-plan" });
 		this.planEl.setText("点击「预览计划」查看每个库将发生什么。");
+		this.backupEl = contentEl.createEl("div");
 	}
 
 	onClose() { this.contentEl.empty(); }
@@ -522,6 +549,16 @@ class LinkerModal extends Modal {
 	private refresh() {
 		this.contentEl.empty();
 		this.onOpen();
+	}
+
+	/** Set every checkbox inside `container` to `on` and sync the picked set. */
+	private toggleAll(container: HTMLElement, on: boolean, keys: string[], picked: Set<string>) {
+		container.querySelectorAll("input[type=checkbox]").forEach((el) => {
+			(el as HTMLInputElement).checked = on;
+		});
+		for (const k of keys) {
+			if (on) picked.add(k); else picked.delete(k);
+		}
 	}
 
 	private selectedVaults(): VaultInfo[] {
@@ -582,13 +619,44 @@ class LinkerModal extends Modal {
 
 	private showBackups() {
 		const all = this.plugin.listBackups();
+		const el = this.backupEl;
+		if (!el) return;
+		el.empty();
+		el.createEl("h4", { text: "🗑 备份管理" });
 		if (all.length === 0) {
-			if (this.planEl) this.planEl.setText("备份管理：还没有任何 .bak-* 备份。");
+			el.createEl("p", { text: "还没有任何 .bak-* 备份。执行同步产生备份后会出现在这里。" });
 			return;
 		}
-		const lines = [`备份管理（共 ${all.length} 个，超过 ${BACKUP_KEEP_DAYS} 天的会在加载时自动清理）：`];
-		for (const b of all) lines.push(`  ${b.vault} → ${path.basename(b.path)}（${Math.floor(b.ageDays)} 天前）`);
-		lines.push("", "手动删除请直接到对应 vault 的 .obsidian 里操作；或点「预览计划→执行同步」让旧文件再次被备份替换。");
-		if (this.planEl) this.planEl.setText(lines.join("\n"));
+		el.createEl("div", {
+			text: `共 ${all.length} 个备份（超过 ${BACKUP_KEEP_DAYS} 天的在插件加载时会自动清理）；勾选后点「删除选中」。`,
+			cls: "mvl-summary",
+		});
+		const list = el.createEl("div", { cls: "mvl-list" });
+		const picked = new Set<string>();
+		for (const b of all) {
+			const row = list.createEl("label", { cls: "mvl-row" });
+			const cb = row.createEl("input", { type: "checkbox" });
+			cb.addEventListener("change", () => {
+				cb.checked ? picked.add(b.path) : picked.delete(b.path);
+			});
+			row.createEl("span", {
+				text: `${b.vault} → ${path.basename(b.path)}（${Math.floor(b.ageDays)} 天前）`,
+				cls: "mvl-name",
+			});
+		}
+		const bar = el.createEl("div", { cls: "mvl-actions" });
+		const pathsOf = () => all.map((b) => b.path);
+		const setAll = (on: boolean) => {
+			list.querySelectorAll("input[type=checkbox]").forEach((c) => { (c as HTMLInputElement).checked = on; });
+			for (const p of pathsOf()) { if (on) picked.add(p); else picked.delete(p); }
+		};
+		bar.createEl("button", { text: "全选" }, (b) => b.addEventListener("click", () => setAll(true)));
+		bar.createEl("button", { text: "全不选" }, (b) => b.addEventListener("click", () => setAll(false)));
+		bar.createEl("button", { text: "删除选中", cls: "mod-warning" }, (b) => b.addEventListener("click", () => {
+			const n = this.plugin.deleteBackups([...picked]);
+			picked.clear();
+			new Notice(n > 0 ? `已删除 ${n} 个备份` : "没有选中任何备份");
+			this.showBackups(); // re-render with the survivors
+		}));
 	}
 }
