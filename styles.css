@@ -1,0 +1,10 @@
+.mvl-summary { color: var(--text-muted); font-size: var(--font-ui-small); margin: 4px 0 10px; }
+.mvl-list { max-height: 300px; overflow-y: auto; border: 1px solid var(--background-modifier-border); border-radius: 6px; padding: 6px 10px; margin: 6px 0; }
+.mvl-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
+.mvl-row .mvl-name { flex: 1; }
+.mvl-badge { font-size: var(--font-ui-smaller); color: var(--text-muted); }
+.mvl-badge.is-warn { color: var(--text-error); }
+.mvl-badge.is-ok { color: var(--text-success); }
+.mvl-plan { font-family: var(--font-monospace); font-size: var(--font-ui-small); white-space: pre-wrap; }
+.mvl-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+.mvl-actions button { cursor: pointer; }
